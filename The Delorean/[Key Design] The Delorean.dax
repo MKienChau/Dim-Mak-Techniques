@@ -1,0 +1,344 @@
+
+/*;-: -------------------------------------------------------------------------------------------------------
+;-: The Delorean: Dynamic Time Intelligence Slicer
+;-: -------------------------------------------------------------------------------------------------------*/
+
+
+/*=======================================================
+Integration Steps Summarized:
+1) Create TI centric caldendar table in DAX
+2) Store TI details/info table in a variable
+3) Combine summarized columns derived from TI calendar  
+4) Add columns from TI details/info table to calendar derived table
+5) Gaurdrails: Year & Time Intelligence Slicers set to single select drop down
+=======================================================*/
+
+/*=======================================================
+[1] TI Centric Calendar
+=======================================================*/
+
+CalendarDates = 
+/*=======================================================
+ANCHORS VARIABLES
+=======================================================*/
+VAR CurDt=TODAY()
+VAR YR=YEAR(CurDt)
+VAR QT=QUARTER(CurDt)
+VAR MN=MONTH(CurDt)
+VAR WK=WEEKNUM(CurDt,1)
+VAR DY=DAY(CurDt)
+--Last Completed Periods (End Date)
+VAR LEQ=DATE(YR,1+3*INT((MN-1)/3),1)-1
+VAR LEM=EOMONTH(CurDt,-1)
+VAR LEW=CurDt-WEEKDAY(CurDt,1)
+--Last Completed Periods (Start Date)
+VAR LSQ=EDATE(DATE(YR,1+3*INT((MN-1)/3),1),-3)
+VAR LSM=EOMONTH(CurDt,-2)+1
+VAR LSW=CurDt-7-WEEKDAY(CurDt,1)+1
+--Calendar Date Range (1/1/2019 => 12/31/Current Year)
+VAR ED=DATE(YR,12,31)
+VAR SD=DATE(2019,1,1)
+/*===================================
+Calendar Build Out
+===================================*/
+VAR CalendarDatesTmp=
+ADDCOLUMNS(CALENDAR(SD,ED),
+--Years
+    "Year",YEAR([Date]),
+    "Yr",FORMAT([Date],"`YY"),
+    "YearΔ",YR-YEAR([Date]),
+--Quarters
+    "Qtr",QUARTER([Date]),
+    "Quarter",FORMAT([Date],"\Qq"),
+    "QtrName",FORMAT([Date],"YYYY\Qq"),
+--Months
+    "Month",FORMAT([Date],"MMMM"),
+    "Months",MONTH([Date]),
+    "MonthLabel",FORMAT([Date],"MMM"),
+    "MonthName",FORMAT([Date],"YYYY\.MM"),
+    "MonthYr",FORMAT([Date],"MMM'YY"),
+    "MonthsYr",FORMAT([Date],"MM/YY"),
+--Weeks
+    "WkNum",WEEKNUM([Date],1),
+    "WkRange",VAR Y=YEAR([Date]) VAR SW=[Date]-WEEKDAY([Date],1)+1
+        RETURN FORMAT(MAX(DATE(y,1,1),SW),"M/d/YY")&"-"&FORMAT(MIN(SW+6,DATE(y,12,31)),"M/d/YY"),
+    "WkYear",FORMAT([Date],"YYYY")&"-"&FORMAT(WEEKNUM([Date],1),"00"),
+--Days
+    "Day/Wk",WEEKDAY([Date],1),
+    "DayName",FORMAT([Date],"dddd"),
+    "Day/Month",DAY([Date]),
+    "Day/Yr",DATEDIFF(DATE(YEAR([Date]),1,1),[Date],DAY)+1,
+    "DayCount",DATEDIFF(SD,[Date],DAY)+1,
+--Other
+    "Season",VAR M=MONTH([Date])RETURN 
+        SWITCH(TRUE,
+        M IN{3,4,5},"Spring",
+        M IN{6,7,8},"Summer",
+        M IN{9,10,11},"Autumn","Winter")
+)
+RETURN
+/*===================================
+TimeIntelligence Categories:
+    This(YQMWD)
+    Prior(YQMWD)
+    TD(YQMW)
+    LTD(YQMW)
+Trailing(QMWD):
+    TrailingQtrs
+    TrailingMonths
+    TrailingWeeks
+    TrailingDays
+===================================*/
+ADDCOLUMNS(CalendarDatesTmp,
+--Category:This(YQMWD)
+    "ThisYear","P"&YR-[Year],
+    "ThisQtr",IF([Qtr]=QT,"P"&[YearΔ]),
+    "ThisMonth",IF([Months]=MN,"P"&[YearΔ]),
+    "ThisWk",IF([WkNum]=WK,"P"&[YearΔ]),
+    "ThisDay",If([Date]=DATE(YR-[YearΔ],MN,DY),"P"&[YearΔ]),
+--Category:Prior(YQMWD)
+    "PriorYear",IF(YR-1-[Year]>-1,"P"&YR-1-[Year]),
+    "PriorQtr",IF([Qtr]=QUARTER(LEQ),"P"&[YearΔ]),
+    "PriorMonth",IF([Months]=MONTH(LEM),"P"&[YearΔ]),
+    "PriorWk",IF([WkNum]=WEEKNUM(LEW,1),"P"&[YearΔ]),
+    "PriorDay",IF([Date]=DATE(YR-[YearΔ],MN,DY)-1,"P"&[YearΔ]),
+--Category:TD(YQMW)
+    "YTD",IF([Year]=YR-[YearΔ]&&[Date]<=EDATE(CurDt,-12*[YearΔ]),"P"&[YearΔ]),
+    "QTD",IF([Qtr]=QT&&[Date]<=EDATE(CurDt,-12*[YearΔ]),"P"&[YearΔ]),
+    "MTD",IF([Months]=MN&&[Date]<=EDATE(CurDt,-12*[YearΔ]),"P"&[YearΔ]),
+    "WTD",IF([WkNum]=WK&&[Day/Wk]<=WEEKDAY(CurDt,1),"P"&[YearΔ]),
+--Category:LTD(YQMW)
+    "LYTD",IF([Year]<YR&&[Date]<=DATE(YR-[YearΔ],MN,DY),"P"&[YearΔ]-1),
+    "LQTD",IF([Qtr]=QUARTER(LEQ)&&[Date]<=EDATE(LEQ,-12*[YearΔ]),"P"&[YearΔ]),
+    "LMTD",IF([Months]=MONTH(LEM)&&[Date]<=EDATE(LEM,-12*[YearΔ]),"P"&[YearΔ]),
+    "LWTD",IF([WkNum]=WEEKNUM(LEW,1)&&[Day/Wk]<=WEEKDAY(LEW,1),"P"&[YearΔ]),
+/*===================================
+Trailing(QMWD)
+===================================*/
+--TrailingQtrs LSQ>=SD&&[Date]>=LSQ&&[Date]<
+    "Trailing4Q",VAR yd=INT(YEARFRAC([Date],LSQ,1)) VAR LSD=EDATE(LSQ,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<EDATE(LSD,3*4),"P"&yd),
+    "Trailing2Q",VAR yd=INT(YEARFRAC([Date],LSQ,1)) VAR LSD=EDATE(LSQ,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<EDATE(LSD,3*2),"P"&yd),
+    "Trailing1Q",VAR yd=INT(YEARFRAC([Date],LSQ,1)) VAR LSD=EDATE(LSQ,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<EDATE(LSD,3*1),"P"&yd),
+--TrailingMonths
+    "Trailing12m",VAR yd=INT(YEARFRAC([Date],LSM,1)) VAR LSD=EDATE(LSM,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<EDATE(LSD,12),"P"&yd),
+    "Trailing6m",VAR yd=INT(YEARFRAC([Date],LSM,1)) VAR LSD=EDATE(LSM,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<EDATE(LSD,6),"P"&yd),
+    "Trailing3m",VAR yd=INT(YEARFRAC([Date],LSM,1)) VAR LSD=EDATE(LSM,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<EDATE(LSD,3),"P"&yd),
+    "Trailing2m",VAR yd=INT(YEARFRAC([Date],LSM,1)) VAR LSD=EDATE(LSM,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<EDATE(LSD,2),"P"&yd),
+--TrailingWeeks INT(YEARFRAC([Date],LEW,1))
+    "Trailing52w",VAR yd=INT(YEARFRAC([Date],LSW,1)) VAR LSD=EDATE(LSW,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<LSD+(7*52),"P"&yd),
+    "Trailing26w",VAR yd=INT(YEARFRAC([Date],LSW,1)) VAR LSD=EDATE(LSW,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<LSD+(7*26),"P"&yd),
+    "Trailing12w",VAR yd=INT(YEARFRAC([Date],LSW,1)) VAR LSD=EDATE(LSW,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<LSD+(7*12),"P"&yd),
+    "Trailing8w",VAR yd=INT(YEARFRAC([Date],LSW,1)) VAR LSD=EDATE(LSW,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<LSD+(7*8),"P"&yd),
+    "Trailing4w",VAR yd=INT(YEARFRAC([Date],LSW,1)) VAR LSD=EDATE(LSW,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<LSD+(7*4),"P"&yd),
+    "Trailing2w",VAR yd=INT(YEARFRAC([Date],LSW,1)) VAR LSD=EDATE(LSW,-12*yd)RETURN IF(LSD>=SD&&[Date]>=LSD&&[Date]<LSD+(7*2),"P"&yd),
+--TrailingDays LSD>=SD&&[Date]>LSD&&[Date]<=LED
+    "Trailing365d",VAR yd=INT(YEARFRAC([Date],CurDt,1))VAR LED=EDATE(CurDt,-12*yd)VAR LSD=LED-365RETURN IF(LSD>=SD&&[Date]>LSD&&[Date]<=LED,"P"&yd),
+    "Trailing180d",VAR yd=INT(YEARFRAC([Date],CurDt,1))VAR LED=EDATE(CurDt,-12*yd)VAR LSD=LED-180RETURN IF(LSD>=SD&&[Date]>LSD&&[Date]<=LED,"P"&yd),
+    "Trailing120d",VAR yd=INT(YEARFRAC([Date],CurDt,1))VAR LED=EDATE(CurDt,-12*yd)VAR LSD=LED-120RETURN IF(LSD>=SD&&[Date]>LSD&&[Date]<=LED,"P"&yd),
+    "Trailing90d",VAR yd=INT(YEARFRAC([Date],CurDt,1))VAR LED=EDATE(CurDt,-12*yd)VAR LSD=LED-90RETURN IF(LSD>=SD&&[Date]>LSD&&[Date]<=LED,"P"&yd),
+    "Trailing60d",VAR yd=INT(YEARFRAC([Date],CurDt,1))VAR LED=EDATE(CurDt,-12*yd)VAR LSD=LED-60RETURN IF(LSD>=SD&&[Date]>LSD&&[Date]<=LED,"P"&yd),
+    "Trailing30d",VAR yd=INT(YEARFRAC([Date],CurDt,1))VAR LED=EDATE(CurDt,-12*yd)VAR LSD=LED-30RETURN IF(LSD>=SD&&[Date]>LSD&&[Date]<=LED,"P"&yd),
+    "Trailing14d",VAR yd=INT(YEARFRAC([Date],CurDt,1))VAR LED=EDATE(CurDt,-12*yd)VAR LSD=LED-14RETURN IF(LSD>=SD&&[Date]>LSD&&[Date]<=LED,"P"&yd),
+    "Trailing7d",VAR yd=INT(YEARFRAC([Date],CurDt,1))VAR LED=EDATE(CurDt,-12*yd)VAR LSD=LED-7RETURN IF(LSD>=SD&&[Date]>LSD&&[Date]<=LED,"P"&yd)
+)
+
+/*=======================================================
+[2] TI details/info table
+=======================================================*/
+
+VAR TI_Tble=
+SELECTCOLUMNS(
+	FILTER(INFO.VIEW.COLUMNS(),
+		VAR Fld=PATHITEM(SUBSTITUTE([DisplayFolder],"\","|"),1,TEXT) RETURN Fld="_TimeIntelligence"&&[Table]="CalendarDates"),
+	"TimeIntelligence",[Name],
+	"TIGroup",PATHITEMREVERSE(SUBSTITUTE(SUBSTITUTE([DisplayFolder],"\","|"),"_","|"),1,TEXT),
+	"TISort",PATHITEMREVERSE(SUBSTITUTE(SUBSTITUTE([DisplayFolder],"\","|"),"_","|"),2,INTEGER)
+)
+
+/*=======================================================
+[3] Combine summarized columns derived from TI calendar  
+=======================================================*/
+VAR RawTable =
+    UNION(
+--Category:This(YQMWD)
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[ThisYear]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[ThisYear]<>BLANK())),
+            "TimeIntelligence","ThisYear","Period",SELECTEDVALUE(CalendarDates[ThisYear])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[ThisQtr]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[ThisQtr]<>BLANK())),
+            "TimeIntelligence","ThisQtr","Period",SELECTEDVALUE(CalendarDates[ThisQtr])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[ThisMonth]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[ThisMonth]<>BLANK())),
+            "TimeIntelligence","ThisMonth","Period",SELECTEDVALUE(CalendarDates[ThisMonth])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[ThisWk]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[ThisWk]<>BLANK())),
+            "TimeIntelligence","ThisWk","Period",SELECTEDVALUE(CalendarDates[ThisWk])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[ThisDay]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[ThisDay]<>BLANK())),
+            "TimeIntelligence","ThisDay","Period",SELECTEDVALUE(CalendarDates[ThisDay])
+        ),
+--Category:2_Prior(YQMWD)
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[PriorYear]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[PriorYear]<>BLANK())),
+            "TimeIntelligence","PriorYear","Period",SELECTEDVALUE(CalendarDates[PriorYear])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[PriorQtr]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[PriorQtr]<>BLANK())),
+            "TimeIntelligence","PriorQtr","Period",SELECTEDVALUE(CalendarDates[PriorQtr])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[PriorMonth]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[PriorMonth]<>BLANK())),
+            "TimeIntelligence","PriorMonth","Period",SELECTEDVALUE(CalendarDates[PriorMonth])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[PriorWk]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[PriorWk]<>BLANK())),
+            "TimeIntelligence","PriorWk","Period",SELECTEDVALUE(CalendarDates[PriorWk])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[PriorDay]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[PriorDay]<>BLANK())),
+            "TimeIntelligence","PriorDay","Period",SELECTEDVALUE(CalendarDates[PriorDay])
+        ),
+--Category:3_TD(YQMW)
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,CalendarDates[YTD]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[YTD]<>BLANK())),
+            "TimeIntelligence","YTD","Period",SELECTEDVALUE(CalendarDates[YTD])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[QTD]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[QTD]<>BLANK())),
+			"TimeIntelligence","QTD","Period",SELECTEDVALUE(CalendarDates[QTD])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[MTD]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[MTD]<>BLANK())),
+			"TimeIntelligence","MTD","Period",SELECTEDVALUE(CalendarDates[MTD])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[WTD]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[WTD]<>BLANK())),
+			"TimeIntelligence","WTD","Period",SELECTEDVALUE(CalendarDates[WTD])
+        ),
+--Category:4_LTD(YQMW)
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[LYTD]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[LYTD]<>BLANK())),
+			"TimeIntelligence","LYTD","Period",SELECTEDVALUE(CalendarDates[LYTD])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[LQTD]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[LQTD]<>BLANK())),
+			"TimeIntelligence","LQTD","Period",SELECTEDVALUE(CalendarDates[LQTD])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[LMTD]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[LMTD]<>BLANK())),
+			"TimeIntelligence","LMTD","Period",SELECTEDVALUE(CalendarDates[LMTD])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[LWTD]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[LWTD]<>BLANK())),
+			"TimeIntelligence","LWTD","Period",SELECTEDVALUE(CalendarDates[LWTD])
+        ),
+--Category:5_TrailingQtrs
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing4Q]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing4Q]<>BLANK())),
+			"TimeIntelligence","Trailing4Q","Period",SELECTEDVALUE(CalendarDates[Trailing4Q])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing2Q]<>BLANK()),
+			"DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing2Q]<>BLANK())),
+			"TimeIntelligence","Trailing2Q","Period",SELECTEDVALUE(CalendarDates[Trailing2Q])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing1Q]<>BLANK()),
+			"DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing1Q]<>BLANK())),
+			"TimeIntelligence","Trailing1Q","Period",SELECTEDVALUE(CalendarDates[Trailing1Q])
+        ),
+--Category:6_TrailingMonths
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing12m]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing12m]<>BLANK())),
+			"TimeIntelligence","Trailing12m","Period",SELECTEDVALUE(CalendarDates[Trailing12m])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing6m]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing6m]<>BLANK())),
+			"TimeIntelligence","Trailing6m","Period",SELECTEDVALUE(CalendarDates[Trailing6m])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing3m]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing3m]<>BLANK())),
+			"TimeIntelligence","Trailing3m","Period",SELECTEDVALUE(CalendarDates[Trailing3m])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing2m]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing2m]<>BLANK())),
+			"TimeIntelligence","Trailing2m","Period",SELECTEDVALUE(CalendarDates[Trailing2m])
+        ),
+--Category:7_TrailingWeeks
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing52w]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing52w]<>BLANK())),
+			"TimeIntelligence","Trailing52w","Period",SELECTEDVALUE(CalendarDates[Trailing52w])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing26w]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing26w]<>BLANK())),
+			"TimeIntelligence","Trailing26w","Period",SELECTEDVALUE(CalendarDates[Trailing26w])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing12w]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing12w]<>BLANK())),
+			"TimeIntelligence","Trailing12w","Period",SELECTEDVALUE(CalendarDates[Trailing12w])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing8w]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing8w]<>BLANK())),
+			"TimeIntelligence","Trailing8w","Period",SELECTEDVALUE(CalendarDates[Trailing8w])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing4w]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing4w]<>BLANK())),
+			"TimeIntelligence","Trailing4w","Period",SELECTEDVALUE(CalendarDates[Trailing4w])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing2w]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing2w]<>BLANK())),
+			"TimeIntelligence","Trailing2w","Period",SELECTEDVALUE(CalendarDates[Trailing2w])
+        ),
+--Category:8_TrailingDays
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing365d]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing365d]<>BLANK())),
+			"TimeIntelligence","Trailing365d","Period",SELECTEDVALUE(CalendarDates[Trailing365d])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing180d]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing180d]<>BLANK())),
+			"TimeIntelligence","Trailing180d","Period",SELECTEDVALUE(CalendarDates[Trailing180d])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing120d]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing120d]<>BLANK())),
+			"TimeIntelligence","Trailing120d","Period",SELECTEDVALUE(CalendarDates[Trailing120d])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing90d]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing90d]<>BLANK())),
+			"TimeIntelligence","Trailing90d","Period",SELECTEDVALUE(CalendarDates[Trailing90d])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing30d]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing30d]<>BLANK())),
+			"TimeIntelligence","Trailing30d","Period",SELECTEDVALUE(CalendarDates[Trailing30d])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing14d]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing14d]<>BLANK())),
+			"TimeIntelligence","Trailing14d","Period",SELECTEDVALUE(CalendarDates[Trailing14d])
+        ),
+        SUMMARIZECOLUMNS(CalendarDates[Date],FILTER(CalendarDates,[Trailing7d]<>BLANK()),
+            "DateCT",COUNTROWS(FILTER(ALL(CalendarDates),[Trailing7d]<>BLANK())),
+			"TimeIntelligence","Trailing7d","Period",SELECTEDVALUE(CalendarDates[Trailing7d])
+        )
+    )
+RETURN
+
+/*=======================================================
+[4] Add columns from TI details/info table
+=======================================================*/
+    ADDCOLUMNS(
+		RawTable,
+        "Period#",VALUE(SUBSTITUTE([Period],"P","")),
+        "CT/Period",INT([DateCT]/6),
+        "Year",YEAR(TODAY())-VALUE(RIGHT([Period],1)),
+        "TIGroup",VAR TI=[TimeIntelligence] RETURN MAXX(FILTER(TI_Tble,[TimeIntelligence]=TI),[TIGroup]),
+        "TISort",VAR TI=[TimeIntelligence] RETURN 
+            FORMAT(MAXX(FILTER(TI_Tble,[TimeIntelligence]=TI),[TISort]),"00")
+            &FORMAT(RANKX(RawTable,[DateCT],,DESC,Dense),"00")
+)
+
+/*=======================================================
+[5] Gaurdrails
+Create two slicers: Year & Time Intelligence
+Set to single select drop down
+=======================================================*/
