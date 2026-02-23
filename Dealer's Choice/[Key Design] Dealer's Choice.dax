@@ -1,0 +1,149 @@
+/*===============================================
+Dealer's Choice: Multi-Dynamic Measure Selector
+================================================
+
+DESIGN INTENT:
+An extension of the Dyson Sphere dispatcher concept — but instead of
+one slicer controlling one metric across the report, Dealer's Choice
+lets the user select multiple metrics simultaneously and assign each
+selection to a dedicated column slot in a visual.
+
+The user picks N metrics from a multi-select slicer.
+Each selection maps positionally to a pre-placed measure:
+    Calc_0 → 1st selection
+    Calc_1 → 2nd selection
+    Calc_2 → 3rd selection
+    Calc_N → Nth selection
+
+The mechanism exploits SELECTEDMEASURENAME() — each Calc_N measure
+knows its own name, parses the trailing digit, and uses that digit
+as a PATHITEM index into the concatenated slicer selection string.
+
+This allows a single visual table to dynamically rearrange its columns
+based on whatever the user picks, in the order they pick them.
+===============================================*/
+
+
+/*===============================================
+STEP 1 — Calc[Overview] Table
+Used as the multi-select slicer source.
+A static list of metric name strings matching the SWITCH keys
+in the dispatcher below. The user selects from this slicer
+to populate the visual columns dynamically.
+===============================================*/
+
+{
+    "UnitRtn%",
+    "NetLoss$",
+    "NetLoss%",
+    "PriceEff%",
+    "Returns$",
+    "SalesRtn%",
+    "UnitRtn",
+    "Discount$",
+    "Loss$PerOrd",
+    "MgnPerOrd",
+    "Cost$",
+    "Margin$",
+    "Margin%",
+    "NetSls$",
+    "NetUnits",
+    "OrderCT"
+}
+
+
+/*===============================================
+STEP 2 — [CY_Sel] (lives in '_Measures' table)
+Captures the multi-select slicer state as a
+pipe-delimited string for positional parsing.
+
+Why CONCATENATEX with "|" delimiter:
+    PATHITEM uses "|" as its default delimiter.
+    Concatenating selections in slicer order produces
+    a PATH-compatible string that can be indexed by position.
+
+Why ISFILTERED guard:
+    Returns BLANK when nothing is selected, preventing
+    Calc_N measures from returning erroneous values
+    when the slicer is cleared.
+
+Example output when user selects Margin$, NetSls$, OrderCT:
+    "Margin$|NetSls$|OrderCT"
+===============================================*/
+
+[CY_Sel] = IF(
+    ISFILTERED(Calc[Overview]),
+    CONCATENATEX(Calc, Calc[Overview], "|")
+)
+
+
+/*===============================================
+STEP 3 — Calc_0, Calc_1, Calc_2, Calc_N
+Place these measures as columns on visuals/tables.
+Column order on the visual determines slot assignment.
+
+How the positional lookup works:
+    _sv  → the full pipe-delimited selection string from [CY_Sel]
+    _SMN → the name of THIS measure (e.g. "Calc_1")
+    RIGHT(_SMN, 1) → extracts the trailing digit ("1")
+    INT(...)       → converts to integer (1)
+    PATHLENGTH(_sv) > 0 → guard: returns 0 if _sv is blank,
+                          preventing PATHITEM from erroring
+    DIVIDE(INT(RIGHT(_SMN,1)), PATHLENGTH(_sv)>0)
+                   → effectively passes the index through when
+                     selections exist, returns 0 when they don't
+    PATHITEM(_sv, index, TEXT) → retrieves the Nth item from
+                     the delimited string (1-based index)
+
+Example:
+    User selects: Margin$, NetSls$, OrderCT
+    _sv  = "Margin$|NetSls$|OrderCT"
+    Calc_0 → _SMN = "Calc_0" → RIGHT = "0" → PATHITEM index 0
+             → PATHITEM with index 0 returns BLANK (no 0th item)
+             → handled by SWITCH("", BLANK())
+    Calc_1 → _SMN = "Calc_1" → RIGHT = "1" → PATHITEM index 1 → "Margin$"
+    Calc_2 → _SMN = "Calc_2" → RIGHT = "2" → PATHITEM index 2 → "NetSls$"
+    Calc_3 → _SMN = "Calc_3" → RIGHT = "3" → PATHITEM index 3 → "OrderCT"
+
+NOTE: Calc_0 is intentionally the label/header slot in this implementation.
+      Calc_1 onward carry metric values. Adjust indexing if repurposing.
+===============================================*/
+
+-- Repeat this pattern for Calc_0, Calc_1, Calc_2 ... Calc_N
+-- Only the measure name changes — the logic is identical across all slots
+
+VAR _sv  = [CY_Sel]                -- pipe-delimited selection string
+VAR _SMN = SELECTEDMEASURENAME()   -- name of this measure (e.g. "Calc_1")
+VAR _N   = PATHITEM(               -- resolve which metric this slot should display
+    _sv,
+    DIVIDE(
+        INT(RIGHT(_SMN, 1)),       -- extract slot index from measure name
+        PATHLENGTH(_sv) > 0        -- guard against blank _sv (returns 1 when valid, 0 when blank)
+    ),
+    TEXT
+)
+RETURN
+SWITCH(_N,
+    "", BLANK(),           -- no selection or index out of range → blank the column
+    "NetUnits",   [_NetUnits],
+    "Cost$",      [_Cost$],
+    "DateCT",     [_DateCT],
+    "Discount$",  [_Discount$],
+    "Gross$",     [_Gross$],
+    "Margin$",    [_Margin$],
+    "Margin%",    [_Margin%],
+    "OrderCT",    [_OrderCT],
+    "ProductCT",  [_ProductCT],
+    "SalesRtn%",  [_SalesRtn%],
+    "Sales$",     [_Sales$],
+    "Returns$",   [_Returns$],
+    "UnitRtn%",   [_UnitRtn%],
+    "PriceEff%",  [_PriceEff%],
+    "MgnPerOrd",  [_Mgn$PerOrd],
+    "Loss$PerOrd",[_Loss$PerOrd],
+    "NetLoss$",   [_Deductions$],
+    "NetLoss%",   [_Deductions%],
+    "UnitRtn",    [_UnitRtn],
+    "NetSls$",    [_NetSls$],
+                  [_NetSls$]        -- fallback default
+)
