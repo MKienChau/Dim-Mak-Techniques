@@ -1,0 +1,87 @@
+/*=======================================================
+[1] DYNAMIC DISPATCHER: [Calc]
+=======================================================
+    Table References - update to match your model:
+    'Transactions' → your fact table
+    'Metric'       → your field parameter table
+
+    SELECTEDVALUE reads the active slicer selection from
+    Metric[Base] and routes to the corresponding base measure.
+
+    The default "NetSls$" ensures visuals never open blank
+    on load when no slicer selection is active.
+
+    The final line is a fallback — any unmatched selection
+    defaults to Net Sales rather than returning blank.
+    Keep your Metric[Base] values and SWITCH keys in sync
+    to avoid hitting this silently.
+=======================================================*/
+
+Calc = SWITCH(
+    SELECTEDVALUE(Metric[Base], "NetSls$"),
+    "Cost$",      [_Cost$],
+    "Margin$",    [_Margin$],
+    "OrderCT",    [_OrderCT],
+    "Mgn$PerOrd", [_Mgn$PerOrd],
+    "NetSls$",    [_NetSls$],
+                  [_NetSls$]      -- fallback: unmatched selection defaults to Net Sales
+)
+
+
+/*=======================================================
+[2] Prior Year: [PY]
+=======================================================
+    Update 'Transactions' to match your fact table name.
+
+    REMOVEFILTERS lifts any active date filter before
+    shifting context back a year. Without this,
+    SAMEPERIODLASTYEAR attempts to shift within an already
+    filtered date range and returns incorrect or blank results.
+
+    Because [PY] references [Calc] directly, switching the
+    metric slicer automatically updates Prior Year too.
+    No additional configuration needed.
+=======================================================*/
+
+PY = CALCULATE(
+    [Calc],
+    REMOVEFILTERS(Transactions[Date]),           -- lift active date filter
+    SAMEPERIODLASTYEAR(Transactions[Date])       -- shift context back one year
+)
+
+
+/*=======================================================
+[3] Year over Year: [YoY]
+=======================================================
+    Returns BLANK instead of zero when either [Calc] or
+    [PY] has no data.
+
+    Zero implies no change.
+    Blank implies no basis for comparison.
+    That distinction matters when reading the output.
+=======================================================*/
+
+YoY = IF(
+    NOT(ISBLANK([Calc]) || ISBLANK([PY])),
+    [Calc] - [PY]
+)
+
+
+/*=======================================================
+[4] Year over Year %: [YoY%]
+=======================================================
+    ABS([PY]) is used as the denominator rather than
+    [PY] directly.
+
+    If a prior year value is negative — a loss metric
+    for example — a naive divide would flip the sign of
+    the percentage, making an improvement appear as a
+    decline. ABS preserves the correct direction of change
+    regardless of whether the prior year value is positive
+    or negative.
+=======================================================*/
+
+YoY% = DIVIDE(
+    [YoY],
+    ABS([PY])
+)
