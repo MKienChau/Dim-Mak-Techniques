@@ -114,36 +114,30 @@ NOTE: Calc_0 is intentionally the label/header slot in this implementation.
 
 VAR _sv  = [CY_Sel]                -- pipe-delimited selection string
 VAR _SMN = SELECTEDMEASURENAME()   -- name of this measure (e.g. "Calc_1")
-VAR _N   = PATHITEM(               -- resolve which metric this slot should display
-    _sv,
-    DIVIDE(
-        INT(RIGHT(_SMN, 1)),       -- extract slot index from measure name
-        PATHLENGTH(_sv) > 0        -- guard against blank _sv (returns 1 when valid, 0 when blank)
-    ),
-    TEXT
-)
+VAR _PIN = INT(RIGHT(_SMN, 1))       -- Pathitem number extracted from last character of SELECTEDMEASURENAME()
+VAR _N = IF(PATHLENGTH(_sv)>=_PIN,PATHITEM(_sv,_PIN,TEXT))
+
 RETURN
 SWITCH(_N,
-    "", BLANK(),           -- no selection or index out of range → blank the column
-    "NetUnits",   [_NetUnits],
-    "Cost$",      [_Cost$],
-    "DateCT",     [_DateCT],
-    "Discount$",  [_Discount$],
-    "Gross$",     [_Gross$],
-    "Margin$",    [_Margin$],
-    "Margin%",    [_Margin%],
-    "OrderCT",    [_OrderCT],
-    "ProductCT",  [_ProductCT],
-    "SalesRtn%",  [_SalesRtn%],
-    "Sales$",     [_Sales$],
-    "Returns$",   [_Returns$],
-    "UnitRtn%",   [_UnitRtn%],
-    "PriceEff%",  [_PriceEff%],
-    "MgnPerOrd",  [_Mgn$PerOrd],
+	"NetUnits",[_NetUnits],
+	"Cost$",[_Cost$],
+    "DateCT",[_DateCT],
+    "Discount$",[_Discount$],
+    "Gross$",[_Gross$],
+    "Margin$",[_Margin$],
+    "Margin%",[_Margin%],
+    "OrderCT",[_OrderCT],
+    "ProductCT",[_ProductCT],
+    "SalesRtn%",[_SalesRtn%],
+    "Sales$",[_Sales$],
+    "Returns$",[_Returns$],
+    "UnitRtn%",[_UnitRtn%],
+    "PriceEff%",[_PriceEff%],
+    "MgnPerOrd",[_Mgn$PerOrd],
     "Loss$PerOrd",[_Loss$PerOrd],
-    "NetLoss$",   [_Deductions$],
-    "NetLoss%",   [_Deductions%],
-    "UnitRtn",    [_UnitRtn],
-    "NetSls$",    [_NetSls$],
-                  [_NetSls$]        -- fallback default
+    "NetLoss$",[_Deductions$],
+    "NetLoss%",[_Deductions%],
+    "UnitRtn",[_UnitRtn],
+	"NetSls$",[_NetSls$],
+                BLANK()
 )
